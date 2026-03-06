@@ -1,0 +1,35 @@
+{
+  "name": "game-x",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:e2e": "node scripts/smoke-e2e.mjs",
+    "smoke:auth": "node scripts/smoke-auth.mjs",
+    "qa:full": "node scripts/qa-full.mjs"
+  },
+  "dependencies": {
+    "@auth/mongodb-adapter": "^3.11.1",
+    "framer-motion": "^11.15.0",
+    "lucide-react": "^0.468.0",
+    "mongodb": "^6.21.0",
+    "mongoose": "^8.8.4",
+    "next": "^15.1.0",
+    "next-auth": "^4.24.13",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sonner": "^2.0.7",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "25.3.5",
+    "@types/react": "19.2.14",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16",
+    "typescript": "5.9.3"
+  }
+}
