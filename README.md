@@ -141,9 +141,9 @@ npm run qa:full
 - `PATCH /api/admin/computers/:id` — завершення сесії адміном
 - `GET /api/admin/audit-logs` — журнал подій (admin-only)
 - `GET /api/health` — health-check
-- `GET /api/cron/release-pcs` — cron завершення прострочених сесій
-- `GET /api/cron/cleanup-idempotency` — cleanup старих idempotency-ключів
-- `GET /api/cron/archive-audit-logs` — архівація audit логів
+- `POST /api/cron/release-pcs` — cron завершення прострочених сесій
+- `POST /api/cron/cleanup-idempotency` — cleanup старих idempotency-ключів
+- `POST /api/cron/archive-audit-logs` — архівація audit логів
 
 ## 10) Принципи архітектури
 

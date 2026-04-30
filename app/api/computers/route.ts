@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { fail, ok } from "@/lib/api-response";
+import { getLatestActiveBookingsByComputer } from "@/lib/computer-bookings";
 import { connectDB } from "@/lib/mongodb";
 import { buildSeedComputers } from "@/lib/seed-computers";
 import { Computer } from "@/models/Computer";
-import { Booking } from "@/models/Booking";
 
 export async function GET() {
   try {
@@ -15,24 +15,8 @@ export async function GET() {
       await Computer.insertMany(buildSeedComputers());
       computers = await Computer.find({}).lean();
     }
-    const occupiedIds = computers
-      .filter((c) => c.status === "зайнятий")
-      .map((c) => c._id);
-
-    const activeBookings = await Booking.find({
-      computer: { $in: occupiedIds },
-      isCompleted: { $ne: true },
-    })
-      .sort({ startTime: -1 })
-      .lean();
-
-    const endTimeByComputer = new Map<string, string>();
-    for (const b of activeBookings) {
-      const cid = b.computer.toString();
-      if (!endTimeByComputer.has(cid)) {
-        endTimeByComputer.set(cid, b.endTime.toISOString());
-      }
-    }
+    const occupiedIds = computers.filter((c) => c.status === "зайнятий").map((c) => c._id);
+    const activeBookingsByComputer = await getLatestActiveBookingsByComputer(occupiedIds);
 
     const serialized = computers.map((c) => {
       const base = {
@@ -42,7 +26,7 @@ export async function GET() {
         status: c.status,
         pricePerHour: c.pricePerHour,
       };
-      const endTime = endTimeByComputer.get(c._id.toString());
+      const endTime = activeBookingsByComputer.get(c._id.toString())?.endTime.toISOString();
       return endTime ? { ...base, endTime } : base;
     });
 

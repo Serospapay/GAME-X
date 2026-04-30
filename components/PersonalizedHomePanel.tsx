@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { ShieldCheck, UserCircle2 } from "lucide-react";
+import { fetchJsonWithRetry } from "@/lib/fetch-json";
 
 interface UserSummary {
   role: "user";
@@ -35,14 +36,37 @@ export default function PersonalizedHomePanel() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (status !== "authenticated") return;
+    if (status !== "authenticated") {
+      setData(null);
+      setLoading(false);
+      return;
+    }
 
+    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
-    fetch("/api/personalization")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json: PersonalizationData | null) => setData(json))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
+    fetchJsonWithRetry<PersonalizationData>(
+      "/api/personalization",
+      {
+        signal: controller.signal,
+        headers: { accept: "application/json" },
+      },
+      1
+    )
+      .then((json) => {
+        if (!cancelled) setData(json);
+      })
+      .catch(() => {
+        if (!cancelled) setData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [status]);
 
   if (status !== "authenticated") {
@@ -73,11 +97,7 @@ export default function PersonalizedHomePanel() {
             Вітаємо, {data.name}
           </p>
           <span
-            className={`rounded-full border px-2 py-0.5 text-xs ${
-              isAdmin
-                ? "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
-                : "border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
-            }`}
+            className="rounded-full border border-[var(--accent-border)] bg-[var(--accent-soft)] px-2 py-0.5 text-xs text-[var(--accent-text)]"
           >
             {isAdmin ? "Адміністратор" : "Користувач"}
           </span>

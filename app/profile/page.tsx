@@ -1,8 +1,9 @@
-import mongoose from "mongoose";
+import Image from "next/image";
 import { getServerSession } from "next-auth";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/auth";
+import { buildBookingOwnerQuery } from "@/lib/booking-owner";
 import { connectDB } from "@/lib/mongodb";
 import { Booking } from "@/models/Booking";
 
@@ -60,18 +61,10 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
 
   await connectDB();
 
-  const filters: Array<Record<string, unknown>> = [];
-  if (session.user.id && mongoose.Types.ObjectId.isValid(session.user.id)) {
-    filters.push({ clientId: new mongoose.Types.ObjectId(session.user.id) });
-  }
-  if (session.user.email) {
-    filters.push({ clientEmail: session.user.email });
-  }
-  if (filters.length === 0) {
-    filters.push({ _id: null });
-  }
-
-  const bookingOwnerQuery = filters.length === 1 ? filters[0] : { $or: filters };
+  const bookingOwnerQuery = buildBookingOwnerQuery({
+    userId: session.user.id,
+    email: session.user.email,
+  });
 
   const [activeBookings, completedBookings] = await Promise.all([
     Booking.find({ ...bookingOwnerQuery, isCompleted: { $ne: true } })
@@ -225,12 +218,13 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
         <h2 className="mb-4 text-lg font-semibold text-white">Профіль</h2>
         <div className="flex items-center gap-4">
           {session.user.image ? (
-            <img
+            <Image
               src={session.user.image}
               alt={session.user.name ? `Аватар ${session.user.name}` : "Аватар користувача"}
               className="h-16 w-16 rounded-full"
               width={64}
               height={64}
+              unoptimized
             />
           ) : (
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-700 text-2xl font-medium text-white">

@@ -9,9 +9,9 @@ import { Booking } from "@/models/Booking";
 const CRON_SECRET = process.env.CRON_SECRET;
 const IDEMPOTENCY_RETENTION_HOURS = 24;
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const ipKey = getIpKey(request);
-  const rate = checkRoleRateLimit(
+  const rate = await checkRoleRateLimit(
     "cron-idempotency-cleanup",
     "system",
     ipKey,
@@ -69,11 +69,15 @@ export async function GET(request: NextRequest) {
         message: error instanceof Error ? error.message : "Unknown error",
       },
     });
-    console.error("GET /api/cron/cleanup-idempotency:", error);
+    console.error("POST /api/cron/cleanup-idempotency:", error);
     return fail(
       "Помилка cleanup idempotency-ключів",
       500,
       "CRON_IDEMPOTENCY_CLEANUP_FAILED"
     );
   }
+}
+
+export async function GET() {
+  return fail("Method Not Allowed", 405, "METHOD_NOT_ALLOWED");
 }

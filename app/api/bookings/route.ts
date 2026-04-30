@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
   const idempotencyKey = rawIdempotencyKey
     ? `${ipKey}:${rawIdempotencyKey}`
     : undefined;
-  const rate = checkRoleRateLimit(
+  const rate = await checkRoleRateLimit(
     "bookings",
     role,
     identityKey,
@@ -126,35 +126,53 @@ export async function POST(request: NextRequest) {
       }
 
       const totalAmount = computer.pricePerHour * hours;
-      const created = await Booking.create(
-        [
-          {
-            computer: computerObjectId,
-            clientName: name,
-            clientId,
-            clientEmail,
-            startTime: now,
-            endTime,
-            totalAmount,
-            idempotencyKey,
-          },
-        ],
-        sessionTx ? { session: sessionTx } : undefined
-      );
+      let booking: { _id: mongoose.Types.ObjectId } | null = null;
+      try {
+        const created = await Booking.create(
+          [
+            {
+              computer: computerObjectId,
+              clientName: name,
+              clientId,
+              clientEmail,
+              startTime: now,
+              endTime,
+              totalAmount,
+              idempotencyKey,
+            },
+          ],
+          sessionTx ? { session: sessionTx } : undefined
+        );
+        booking = created[0];
 
-      const booking = created[0];
-      await writeAuditLog({
-        actorEmail: clientEmail ?? undefined,
-        actorRole: session?.user ? "user" : "system",
-        action: "booking.create",
-        targetType: "booking",
-        targetId: booking._id.toString(),
-        metadata: {
-          computerId: computerObjectId.toString(),
-          hours,
-          totalAmount,
-        },
-      });
+        await writeAuditLog({
+          actorEmail: clientEmail ?? undefined,
+          actorRole: session?.user ? "user" : "system",
+          action: "booking.create",
+          targetType: "booking",
+          targetId: booking._id.toString(),
+          metadata: {
+            computerId: computerObjectId.toString(),
+            hours,
+            totalAmount,
+          },
+        });
+      } catch (error) {
+        if (!sessionTx) {
+          if (booking?._id) {
+            await Booking.deleteOne({ _id: booking._id });
+          }
+          await Computer.updateOne(
+            { _id: computerObjectId, status: "зайнятий" },
+            { status: "вільний" }
+          );
+        }
+        throw error;
+      }
+
+      if (!booking) {
+        throw new Error("Booking was not created");
+      }
       return ok(
         {
           success: true,

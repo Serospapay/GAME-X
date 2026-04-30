@@ -10,9 +10,9 @@ import { Booking } from "@/models/Booking";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const ipKey = getIpKey(request);
-  const rate = checkRoleRateLimit(
+  const rate = await checkRoleRateLimit(
     "cron-release",
     "system",
     ipKey,
@@ -110,7 +110,11 @@ export async function GET(request: NextRequest) {
         message: error instanceof Error ? error.message : "Unknown error",
       },
     });
-    console.error("GET /api/cron/release-pcs:", error);
+    console.error("POST /api/cron/release-pcs:", error);
     return fail("Помилка при автоматичному звільненні ПК", 500, "CRON_RELEASE_FAILED");
   }
+}
+
+export async function GET() {
+  return fail("Method Not Allowed", 405, "METHOD_NOT_ALLOWED");
 }

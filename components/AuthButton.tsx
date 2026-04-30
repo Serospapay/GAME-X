@@ -3,8 +3,11 @@
 import { useSession, signOut } from "next-auth/react";
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 
 export default function AuthButton() {
+  const router = useRouter();
   const { data: session, status } = useSession();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -43,16 +46,16 @@ export default function AuthButton() {
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-2 rounded-full border border-neutral-600 bg-neutral-800 p-1 pr-2 transition hover:bg-neutral-700"
-        aria-expanded={open}
         aria-haspopup="true"
       >
         {user.image ? (
-          <img
+          <Image
             src={user.image}
             alt={user.name ? `Аватар ${user.name}` : "Аватар"}
             className="h-7 w-7 rounded-full"
             width={28}
             height={28}
+            unoptimized
           />
         ) : (
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-600 text-xs font-medium text-white">
@@ -81,9 +84,18 @@ export default function AuthButton() {
             </Link>
           )}
           <button
-            onClick={() => {
+            onClick={async () => {
               setOpen(false);
-              signOut();
+              try {
+                const result = await signOut({
+                  callbackUrl: "/",
+                  redirect: false,
+                });
+                router.push(result?.url ?? "/");
+                router.refresh();
+              } catch {
+                window.location.href = "/";
+              }
             }}
             className="block w-full px-4 py-2 text-left text-sm text-neutral-200 transition hover:bg-neutral-800"
           >

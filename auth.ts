@@ -30,14 +30,15 @@ const hasGoogleProvider =
   Boolean(process.env.GOOGLE_CLIENT_ID) && Boolean(process.env.GOOGLE_CLIENT_SECRET);
 const hasDiscordProvider =
   Boolean(process.env.DISCORD_CLIENT_ID) && Boolean(process.env.DISCORD_CLIENT_SECRET);
-const enableLocalCredentials =
-  process.env.ENABLE_LOCAL_CREDENTIALS === "true" ||
-  process.env.NODE_ENV !== "production";
+const enableLocalCredentials = process.env.ENABLE_LOCAL_CREDENTIALS === "true";
 
-const devAdminEmail = process.env.DEV_ADMIN_EMAIL ?? "admin@game-x.local";
-const devAdminPassword = process.env.DEV_ADMIN_PASSWORD ?? "admin12345";
-const devUserEmail = process.env.DEV_USER_EMAIL ?? "user@game-x.local";
-const devUserPassword = process.env.DEV_USER_PASSWORD ?? "user12345";
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required env: ${name}`);
+  }
+  return value;
+}
 
 const providers: NextAuthOptions["providers"] = [];
 
@@ -60,6 +61,11 @@ if (hasDiscordProvider) {
 }
 
 if (enableLocalCredentials) {
+  const devAdminEmail = requireEnv("DEV_ADMIN_EMAIL");
+  const devAdminPassword = requireEnv("DEV_ADMIN_PASSWORD");
+  const devUserEmail = requireEnv("DEV_USER_EMAIL");
+  const devUserPassword = requireEnv("DEV_USER_PASSWORD");
+
   providers.push(
     CredentialsProvider({
       name: "Local Dev Login",
@@ -102,7 +108,7 @@ if (enableLocalCredentials) {
 
 if (providers.length === 0) {
   throw new Error(
-    "Не налаштовано жодного провайдера авторизації. Додайте OAuth ключі або увімкніть dev-режим."
+    "Не налаштовано жодного провайдера авторизації. Додайте OAuth ключі або увімкніть локальні credentials через env."
   );
 }
 

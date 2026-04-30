@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
+import { useSession } from "next-auth/react";
 import BookingModal, { type BookingComputer } from "./BookingModal";
 import CountdownTimer from "./CountdownTimer";
 
@@ -130,6 +131,7 @@ function CrownIcon() {
 }
 
 export default function LiveMap() {
+  const { data: session } = useSession();
   const [computers, setComputers] = useState<Computer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -214,6 +216,7 @@ export default function LiveMap() {
   }
 
   if (computers.length === 0) {
+    const canSeed = process.env.NODE_ENV !== "production" && Boolean(session?.user?.isAdmin);
     return (
       <div className="rounded-xl border border-white/10 bg-white/5 px-6 py-6 text-center">
         <p className="text-sm text-neutral-300">
@@ -233,12 +236,12 @@ export default function LiveMap() {
           >
             Оновити карту
           </button>
-          {process.env.NODE_ENV !== "production" && (
+          {canSeed && (
             <button
               type="button"
               onClick={async () => {
                 setLoading(true);
-                await fetch("/api/seed").catch(() => null);
+                await fetch("/api/seed", { method: "POST" }).catch(() => null);
                 await loadComputers();
               }}
               className="rounded-lg border border-purple-500/40 bg-purple-500/10 px-4 py-2 text-sm font-medium text-purple-300 transition hover:bg-purple-500/20"

@@ -12,8 +12,15 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ nextauth: string[] }> }
 ) {
+  const params = await context.params;
+  const authAction = params.nextauth?.[0];
+  const isSensitiveAuthAction = authAction === "callback" || authAction === "signin";
+  if (!isSensitiveAuthAction) {
+    return handler(request, context);
+  }
+
   const ipKey = getIpKey(request);
-  const rate = checkRoleRateLimit(
+  const rate = await checkRoleRateLimit(
     "auth",
     "guest",
     ipKey,
@@ -26,5 +33,6 @@ export async function POST(
       "AUTH_RATE_LIMITED"
     );
   }
+
   return handler(request, context);
 }

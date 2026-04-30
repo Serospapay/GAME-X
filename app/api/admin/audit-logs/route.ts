@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   const auth = await requireAdmin();
   if (auth.response) return auth.response;
   const adminIdentity = auth.session.user.email ?? getIpKey(request);
-  const rate = checkRoleRateLimit(
+  const rate = await checkRoleRateLimit(
     "admin-audit",
     "admin",
     adminIdentity,

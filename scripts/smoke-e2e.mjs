@@ -22,13 +22,13 @@ async function run() {
     method: "GET",
   });
   await expectStatus("/api/cron/release-pcs", [401], {
-    method: "GET",
+    method: "POST",
   });
   await expectStatus("/api/cron/cleanup-idempotency", [401], {
-    method: "GET",
+    method: "POST",
   });
   await expectStatus("/api/cron/archive-audit-logs", [401], {
-    method: "GET",
+    method: "POST",
   });
 
   // Перевірка idempotency/валідації на публічному сценарії без дублювань.

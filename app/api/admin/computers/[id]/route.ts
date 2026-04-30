@@ -31,7 +31,7 @@ export async function PATCH(
     if (adminAuth.response) return adminAuth.response;
     const actorEmail = adminAuth.session?.user?.email ?? undefined;
     const adminIdentity = actorEmail ?? getIpKey(request);
-    const rate = checkRoleRateLimit(
+    const rate = await checkRoleRateLimit(
       "admin-release",
       "admin",
       adminIdentity,

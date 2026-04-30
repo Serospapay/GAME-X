@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Блок-схема БД та логічна схема ІС — Game-X</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 2rem; background: #f4f7fb; font-family: 'Segoe UI', system-ui, sans-serif; color: #1f2937; }
+    h1 { color: #1e3a8a; text-align: center; font-size: 2rem; margin-bottom: 2rem; }
+    h2 { color: #1e40af; font-size: 1.35rem; margin: 2.5rem 0 1rem; }
+    .diagram-wrap { background: #ffffff; border-radius: 12px; border: 1px solid #dbe4f0; padding: 2rem; overflow-x: auto; margin-bottom: 3rem; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
+    svg { display: block; }
+  </style>
+</head>
+<body>
+  <h1>Архітектура системи «Game-X»</h1>
+
+  <h2>Блок-схема бази даних (ER-діаграма)</h2>
+  <div class="diagram-wrap">
+    <svg viewBox="0 0 1100 760" width="100%" height="760" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L6,3 z" fill="#1e40af"/>
+        </marker>
+        <marker id="arrow2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L6,3 z" fill="#3b82f6"/>
+        </marker>
+      </defs>
+
+      <!-- User -->
+      <rect x="450" y="20" width="220" height="76" rx="4" fill="#eff6ff" stroke="#1e40af" stroke-width="2"/>
+      <rect x="450" y="20" width="220" height="28" rx="4" fill="#bfdbfe"/>
+      <text x="560" y="40" text-anchor="middle" fill="#1e3a8a" font-weight="bold" font-size="14">User (NextAuth)</text>
+      <text x="465" y="58" fill="#334155" font-size="11">id, email, name, image</text>
+      <text x="465" y="72" fill="#334155" font-size="11">isAdmin (через session callback)</text>
+      <text x="465" y="86" fill="#64748b" font-size="10">Примітка: локальні dev-акаунти</text>
+
+      <!-- Booking/Computer domain -->
+      <rect x="40" y="140" width="520" height="290" rx="6" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="6 4"/>
+      <text x="300" y="165" text-anchor="middle" fill="#64748b" font-size="12">Бронювання залу</text>
+
+      <!-- Computer -->
+      <rect x="70" y="190" width="230" height="88" rx="4" fill="#f8fafc" stroke="#60a5fa" stroke-width="1"/>
+      <rect x="70" y="190" width="230" height="24" rx="4" fill="#93c5fd"/>
+      <text x="185" y="207" text-anchor="middle" fill="#1e3a8a" font-weight="bold" font-size="12">Computer</text>
+      <text x="85" y="226" fill="#334155" font-size="10">id, name (unique), type</text>
+      <text x="85" y="239" fill="#334155" font-size="10">status: вільний/зайнятий/ремонт</text>
+      <text x="85" y="252" fill="#334155" font-size="10">pricePerHour, timestamps</text>
+      <text x="85" y="265" fill="#64748b" font-size="10">index(status,type), index(type,status,price)</text>
+
+      <!-- Booking -->
+      <rect x="330" y="190" width="210" height="130" rx="4" fill="#f8fafc" stroke="#60a5fa" stroke-width="1"/>
+      <rect x="330" y="190" width="210" height="24" rx="4" fill="#93c5fd"/>
+      <text x="435" y="207" text-anchor="middle" fill="#1e3a8a" font-weight="bold" font-size="12">Booking</text>
+      <text x="345" y="226" fill="#334155" font-size="10">id, computer, clientName</text>
+      <text x="345" y="239" fill="#334155" font-size="10">clientId?, clientEmail?</text>
+      <text x="345" y="252" fill="#334155" font-size="10">startTime, endTime, totalAmount</text>
+      <text x="345" y="265" fill="#334155" font-size="10">isCompleted, idempotencyKey?</text>
+      <text x="345" y="278" fill="#64748b" font-size="10">timestamps</text>
+      <text x="345" y="291" fill="#64748b" font-size="10">unique sparse(idempotencyKey)</text>
+      <text x="345" y="304" fill="#64748b" font-size="10">indexes: computer,isCompleted,endTime</text>
+
+      <path d="M 300 235 L 330 235" stroke="#6ea8fe" stroke-width="1" fill="none" marker-end="url(#arrow2)"/>
+      <text x="305" y="226" fill="#6ea8fe" font-size="9">1:N</text>
+
+      <path d="M 560 96 L 560 150 L 430 150 L 430 190" stroke="#d4af37" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <text x="520" y="142" fill="#d4af37" font-size="9">User -> Booking</text>
+
+      <!-- Tariff projection -->
+      <rect x="70" y="330" width="470" height="80" rx="4" fill="#f8fafc" stroke="#94a3b8" stroke-width="1"/>
+      <rect x="70" y="330" width="470" height="24" rx="4" fill="#cbd5e1"/>
+      <text x="305" y="347" text-anchor="middle" fill="#1e293b" font-weight="bold" font-size="11">Tariff View (агрегація з Computer)</text>
+      <text x="85" y="366" fill="#64748b" font-size="10">/api/tariffs групує type -> min(pricePerHour)</text>
+      <text x="85" y="380" fill="#64748b" font-size="10">fallback тарифи в UI: Standard / VIP / PS5</text>
+      <text x="85" y="394" fill="#64748b" font-size="10">для відмовостійкості, якщо API порожній</text>
+
+      <!-- Audit domain -->
+      <rect x="590" y="140" width="470" height="290" rx="6" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="6 4"/>
+      <text x="825" y="165" text-anchor="middle" fill="#64748b" font-size="12">Аудит та операційна прозорість</text>
+
+      <rect x="620" y="190" width="200" height="116" rx="4" fill="#f8fafc" stroke="#60a5fa" stroke-width="1"/>
+      <rect x="620" y="190" width="200" height="24" rx="4" fill="#93c5fd"/>
+      <text x="720" y="207" text-anchor="middle" fill="#1e3a8a" font-weight="bold" font-size="12">AuditLog</text>
+      <text x="635" y="226" fill="#334155" font-size="10">id, actorEmail?, actorRole</text>
+      <text x="635" y="239" fill="#334155" font-size="10">action, targetType, targetId?</text>
+      <text x="635" y="252" fill="#334155" font-size="10">metadata, expiresAt, timestamps</text>
+      <text x="635" y="265" fill="#64748b" font-size="10">TTL index(expiresAt)</text>
+      <text x="635" y="278" fill="#64748b" font-size="10">index(action,createdAt)</text>
+      <text x="635" y="291" fill="#64748b" font-size="10">index(actorRole,createdAt)</text>
+
+      <rect x="850" y="190" width="190" height="130" rx="4" fill="#f8fafc" stroke="#60a5fa" stroke-width="1"/>
+      <rect x="850" y="190" width="190" height="24" rx="4" fill="#93c5fd"/>
+      <text x="945" y="207" text-anchor="middle" fill="#1e3a8a" font-weight="bold" font-size="12">AuditLogArchive</text>
+      <text x="865" y="226" fill="#334155" font-size="10">sourceLogId (unique)</text>
+      <text x="865" y="239" fill="#334155" font-size="10">actorRole, action, targetType</text>
+      <text x="865" y="252" fill="#334155" font-size="10">metadata, sourceCreatedAt</text>
+      <text x="865" y="265" fill="#334155" font-size="10">expiresAt, timestamps</text>
+      <text x="865" y="278" fill="#64748b" font-size="10">TTL index(expiresAt)</text>
+      <text x="865" y="291" fill="#64748b" font-size="10">index(sourceLogId)</text>
+      <text x="865" y="304" fill="#64748b" font-size="10">cron archive pipeline</text>
+
+      <path d="M 820 245 L 850 245" stroke="#6ea8fe" stroke-width="1" fill="none" marker-end="url(#arrow2)"/>
+      <text x="825" y="236" fill="#6ea8fe" font-size="9">archive</text>
+
+      <path d="M 640 96 L 640 190" stroke="#d4af37" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <text x="650" y="144" fill="#d4af37" font-size="9">User/Admin actions</text>
+
+      <!-- Auth infra -->
+      <rect x="300" y="470" width="500" height="240" rx="6" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="6 4"/>
+      <text x="550" y="494" text-anchor="middle" fill="#64748b" font-size="12">Auth та сесії</text>
+
+      <rect x="330" y="520" width="220" height="78" rx="4" fill="#f8fafc" stroke="#94a3b8" stroke-width="1"/>
+      <rect x="330" y="520" width="220" height="24" rx="4" fill="#cbd5e1"/>
+      <text x="440" y="537" text-anchor="middle" fill="#1e293b" font-weight="bold" font-size="11">NextAuth adapter collections</text>
+      <text x="345" y="556" fill="#64748b" font-size="10">users, accounts, sessions, verificationTokens</text>
+      <text x="345" y="570" fill="#64748b" font-size="10">MongoDBAdapter(@auth/mongodb-adapter)</text>
+      <text x="345" y="584" fill="#64748b" font-size="10">JWT session strategy</text>
+
+      <rect x="580" y="520" width="190" height="78" rx="4" fill="#f8fafc" stroke="#94a3b8" stroke-width="1"/>
+      <rect x="580" y="520" width="190" height="24" rx="4" fill="#cbd5e1"/>
+      <text x="675" y="537" text-anchor="middle" fill="#1e293b" font-weight="bold" font-size="11">Admin policy</text>
+      <text x="595" y="556" fill="#64748b" font-size="10">ADMIN_EMAILS</text>
+      <text x="595" y="570" fill="#64748b" font-size="10">isAdmin(email)</text>
+      <text x="595" y="584" fill="#64748b" font-size="10">requireAdmin guard</text>
+
+      <path d="M 560 96 L 560 520" stroke="#d4af37" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+      <text x="570" y="320" fill="#d4af37" font-size="9">auth callbacks</text>
+    </svg>
+  </div>
+
+  <h2>Логічна схема інформаційної системи</h2>
+  <div class="diagram-wrap">
+    <svg viewBox="0 0 980 560" width="100%" height="560" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L6,3 z" fill="#1e40af"/>
+        </marker>
+      </defs>
+
+      <!-- Browser -->
+      <rect x="340" y="20" width="300" height="68" rx="8" fill="#eff6ff" stroke="#1e40af" stroke-width="2"/>
+      <text x="490" y="48" text-anchor="middle" fill="#1e3a8a" font-weight="bold" font-size="14">Користувач (Browser / Mobile)</text>
+      <text x="490" y="66" text-anchor="middle" fill="#334155" font-size="11">Гість / User / Admin</text>
+
+      <path d="M490 88 L490 122" stroke="#d4af37" stroke-width="1" fill="none" marker-end="url(#arr)"/>
+      <text x="500" y="108" fill="#d4af37" font-size="10">HTTPS</text>
+
+      <!-- Frontend -->
+      <rect x="250" y="128" width="480" height="80" rx="8" fill="#ecfeff" stroke="#0891b2" stroke-width="2"/>
+      <text x="490" y="158" text-anchor="middle" fill="#0e7490" font-weight="bold" font-size="14">Frontend (Next.js App Router)</text>
+      <text x="490" y="176" text-anchor="middle" fill="#334155" font-size="11">Home / LiveMap / Profile / Admin / Theme / UI state</text>
+      <text x="490" y="192" text-anchor="middle" fill="#334155" font-size="11">Client components тільки для інтерактивності</text>
+
+      <path d="M490 208 L490 242" stroke="#d4af37" stroke-width="1" fill="none" marker-end="url(#arr)"/>
+      <text x="500" y="228" fill="#d4af37" font-size="10">API Routes</text>
+
+      <!-- API -->
+      <rect x="200" y="248" width="580" height="120" rx="8" fill="#eff6ff" stroke="#60a5fa" stroke-width="2"/>
+      <text x="490" y="278" text-anchor="middle" fill="#1e3a8a" font-weight="bold" font-size="14">Backend (Next.js Route Handlers)</text>
+      <text x="490" y="296" text-anchor="middle" fill="#334155" font-size="11">/api/bookings, /api/computers, /api/personalization, /api/admin/*, /api/cron/*</text>
+      <text x="490" y="312" text-anchor="middle" fill="#334155" font-size="11">Zod validation, requireAuth/requireAdmin, idempotency, transactions</text>
+      <text x="490" y="328" text-anchor="middle" fill="#334155" font-size="11">role-aware rate-limit, unified fail/ok response, audit write</text>
+      <text x="490" y="344" text-anchor="middle" fill="#334155" font-size="11">security middleware + health endpoint</text>
+
+      <path d="M490 368 L490 402" stroke="#d4af37" stroke-width="1" fill="none" marker-end="url(#arr)"/>
+      <text x="500" y="388" fill="#d4af37" font-size="10">Mongoose</text>
+
+      <!-- DB -->
+      <rect x="240" y="408" width="500" height="120" rx="8" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+      <text x="490" y="438" text-anchor="middle" fill="#6d28d9" font-weight="bold" font-size="14">MongoDB</text>
+      <text x="490" y="456" text-anchor="middle" fill="#334155" font-size="11">Computer, Booking, AuditLog, AuditLogArchive + NextAuth collections</text>
+      <text x="490" y="472" text-anchor="middle" fill="#334155" font-size="11">Indexes: status/type, active sessions, idempotency, audit TTL</text>
+      <text x="490" y="488" text-anchor="middle" fill="#334155" font-size="11">Cron pipelines: release expired PCs, cleanup idempotency, archive audit</text>
+      <text x="490" y="504" text-anchor="middle" fill="#334155" font-size="11">Seeds/dev bootstrap + resilient fallback behavior</text>
+
+      <!-- Side blocks -->
+      <rect x="30" y="248" width="150" height="120" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+      <text x="105" y="274" text-anchor="middle" fill="#1e293b" font-weight="bold" font-size="11">QA/CI layer</text>
+      <text x="105" y="292" text-anchor="middle" fill="#64748b" font-size="10">smoke</text>
+      <text x="105" y="307" text-anchor="middle" fill="#64748b" font-size="10">smoke:e2e</text>
+      <text x="105" y="322" text-anchor="middle" fill="#64748b" font-size="10">smoke:auth</text>
+      <text x="105" y="337" text-anchor="middle" fill="#64748b" font-size="10">qa:full</text>
+      <path d="M180 308 L200 308" stroke="#d4af37" stroke-width="1" fill="none" marker-end="url(#arr)"/>
+
+      <rect x="800" y="248" width="150" height="120" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+      <text x="875" y="274" text-anchor="middle" fill="#1e293b" font-weight="bold" font-size="11">Auth layer</text>
+      <text x="875" y="292" text-anchor="middle" fill="#64748b" font-size="10">NextAuth</text>
+      <text x="875" y="307" text-anchor="middle" fill="#64748b" font-size="10">Credentials/OAuth</text>
+      <text x="875" y="322" text-anchor="middle" fill="#64748b" font-size="10">JWT callbacks</text>
+      <text x="875" y="337" text-anchor="middle" fill="#64748b" font-size="10">role projection</text>
+      <path d="M800 308 L780 308" stroke="#d4af37" stroke-width="1" fill="none" marker-end="url(#arr)"/>
+    </svg>
+  </div>
+</body>
+</html>

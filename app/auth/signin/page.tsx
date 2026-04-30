@@ -59,11 +59,17 @@ export default function SignInPage() {
   };
 
   useEffect(() => {
-    fetch("/api/auth/providers")
-      .then((res) => res.json())
+    const controller = new AbortController();
+    fetch("/api/auth/providers", { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : {}))
       .then((data: ProvidersResponse) => setProviders(data))
       .catch(() => setProviders({}));
+    return () => {
+      controller.abort();
+    };
   }, []);
+
+  const hasCredentials = Boolean(providers?.credentials);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-neutral-950">
@@ -71,7 +77,7 @@ export default function SignInPage() {
         <h1 className="mb-6 text-center text-xl font-semibold text-white">
           Увійти в Game-X
         </h1>
-        {isDev && (
+        {isDev && hasCredentials && (
           <form onSubmit={handleLocalLogin} className="mb-5 space-y-3">
             <input
               type="email"
@@ -96,27 +102,28 @@ export default function SignInPage() {
             >
               {loading ? "Вхід..." : "Локальний вхід (dev)"}
             </button>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={fillUser}
-                className="rounded-lg border border-neutral-600 bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition hover:bg-neutral-700"
-              >
-                Demo User
-              </button>
-              <button
-                type="button"
-                onClick={fillAdmin}
-                className="rounded-lg border border-purple-500/40 bg-purple-500/10 px-3 py-2 text-xs font-medium text-purple-200 transition hover:bg-purple-500/20"
-              >
-                Demo Admin
-              </button>
-            </div>
-            <p className="text-xs text-neutral-500">
-              User: {userEmail} / {userPassword}
-              <br />
-              Admin: {adminEmail} / {adminPassword}
-            </p>
+            {(userEmail || adminEmail) && (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {userEmail && (
+                  <button
+                    type="button"
+                    onClick={fillUser}
+                    className="rounded-lg border border-neutral-600 bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition hover:bg-neutral-700"
+                  >
+                    Demo User
+                  </button>
+                )}
+                {adminEmail && (
+                  <button
+                    type="button"
+                    onClick={fillAdmin}
+                    className="rounded-lg border border-purple-500/40 bg-purple-500/10 px-3 py-2 text-xs font-medium text-purple-200 transition hover:bg-purple-500/20"
+                  >
+                    Demo Admin
+                  </button>
+                )}
+              </div>
+            )}
             {error && <p className="text-xs text-red-400">{error}</p>}
           </form>
         )}
@@ -137,6 +144,11 @@ export default function SignInPage() {
           >
             Увійти через Discord
           </button>
+        )}
+        {providers && !providers.google && !providers.discord && !hasCredentials && (
+          <p className="text-center text-xs text-neutral-400">
+            Провайдери входу не налаштовані.
+          </p>
         )}
       </div>
     </div>

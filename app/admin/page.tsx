@@ -1,11 +1,23 @@
 import { getServerSession } from "next-auth";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import {
+  Activity,
+  Archive,
+  ArrowUpDown,
+  MonitorCog,
+  MonitorOff,
+  MonitorPlay,
+  Search,
+  Shield,
+  Siren,
+  TriangleAlert,
+} from "lucide-react";
 import { authOptions } from "@/auth";
 import { isAdmin } from "@/lib/admin";
+import { getLatestActiveBookingsByComputer } from "@/lib/computer-bookings";
 import { connectDB } from "@/lib/mongodb";
 import { Computer } from "@/models/Computer";
-import { Booking } from "@/models/Booking";
 import { AuditLog } from "@/models/AuditLog";
 import { AuditLogArchive } from "@/models/AuditLogArchive";
 import AdminPCAction from "@/components/AdminPCAction";
@@ -77,6 +89,42 @@ function normalizeOccupiedSort(value: string | undefined): OccupiedSort {
   return "end-asc";
 }
 
+function getRiskMeta(diffMinutes: number): {
+  label: string;
+  className: string;
+} {
+  if (diffMinutes < 0) {
+    return {
+      label: "Прострочено",
+      className: "border border-rose-500/30 bg-rose-500/15 text-rose-200",
+    };
+  }
+  if (diffMinutes <= 15) {
+    return {
+      label: "Критично",
+      className: "border border-amber-500/30 bg-amber-500/15 text-amber-200",
+    };
+  }
+  if (diffMinutes <= 60) {
+    return {
+      label: "Скоро",
+      className: "border border-yellow-500/30 bg-yellow-500/15 text-yellow-200",
+    };
+  }
+  return {
+    label: "Норма",
+    className: "border border-emerald-500/30 bg-emerald-500/15 text-emerald-200",
+  };
+}
+
+function formatRemaining(diffMinutes: number): string {
+  if (diffMinutes < 0) return `${Math.abs(diffMinutes)} хв прострочено`;
+  const hours = Math.floor(diffMinutes / 60);
+  const minutes = diffMinutes % 60;
+  if (hours <= 0) return `${minutes} хв`;
+  return `${hours} год ${minutes} хв`;
+}
+
 function buildAdminHref(params: {
   auditSource?: "main" | "archive";
   auditLimit?: number;
@@ -107,31 +155,16 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
   await connectDB();
 
-  const computers = await Computer.find({}).lean();
-  const occupiedIds = computers
-    .filter((c) => c.status === "зайнятий")
-    .map((c) => c._id);
-
-  const activeBookings = await Booking.find({
-    computer: { $in: occupiedIds },
-    isCompleted: { $ne: true },
-  })
-    .sort({ startTime: -1 })
-    .lean();
-
-  const bookingByComputer = new Map<string, BookingDoc>();
-  for (const b of activeBookings) {
-    const cid = b.computer.toString();
-    if (!bookingByComputer.has(cid)) {
-      bookingByComputer.set(cid, {
-        _id: b._id.toString(),
-        clientName: b.clientName,
-        startTime: b.startTime,
-        endTime: b.endTime,
-        totalAmount: b.totalAmount,
-      });
-    }
-  }
+  const [computers, totalItems, freeCount, occupiedCount, repairItemsCount] =
+    await Promise.all([
+      Computer.find({}, "name type status pricePerHour").sort({ name: 1 }).lean(),
+      Computer.countDocuments({}),
+      Computer.countDocuments({ status: "вільний" }),
+      Computer.countDocuments({ status: "зайнятий" }),
+      Computer.countDocuments({ status: "ремонт" }),
+    ]);
+  const occupiedIds = computers.filter((c) => c.status === "зайнятий").map((c) => c._id);
+  const activeBookingsByComputer = await getLatestActiveBookingsByComputer(occupiedIds);
 
   const items: ComputerWithBooking[] = computers.map((c) => ({
     _id: c._id.toString(),
@@ -139,15 +172,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     type: c.type,
     status: c.status,
     pricePerHour: c.pricePerHour,
-    booking: bookingByComputer.get(c._id.toString()) ?? null,
+    booking: activeBookingsByComputer.get(c._id.toString()) ?? null,
   }));
 
   const occupiedItems = items.filter((i) => i.status === "зайнятий");
   const freeItems = items.filter((i) => i.status !== "зайнятий");
-  const repairItemsCount = items.filter((i) => i.status === "ремонт").length;
-  const totalItems = items.length;
   const occupancyPercent =
-    totalItems > 0 ? Math.round((occupiedItems.length / totalItems) * 100) : 0;
+    totalItems > 0 ? Math.round((occupiedCount / totalItems) * 100) : 0;
   const sp = (await searchParams) ?? {};
   const query = sp.q?.trim() ?? "";
   const queryLower = query.toLowerCase();
@@ -188,6 +219,16 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       }
       return a.diffMinutes - b.diffMinutes;
     });
+
+  const commonParams = {
+    auditSource,
+    auditLimit,
+    q: query,
+    type: typeFilter,
+    ending: endingFilter,
+    sort: occupiedSort,
+  } as const;
+
   const overdueCount = occupiedItems.filter((row) => {
     if (!row.booking) return false;
     return new Date(row.booking.endTime).getTime() < nowTs;
@@ -223,440 +264,406 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       year: "numeric",
     });
 
+  const occupancyLabel =
+    occupancyPercent >= 90
+      ? "Критичне завантаження"
+      : occupancyPercent >= 75
+        ? "Високе завантаження"
+        : occupancyPercent >= 50
+          ? "Робочий режим"
+          : "Помірне завантаження";
+
+  const typeFilters: Array<{ id: PcTypeFilter; label: string }> = [
+    { id: "all", label: "Всі типи" },
+    { id: "VIP", label: "VIP" },
+    { id: "Standard", label: "Standard" },
+    { id: "PS5", label: "PS5" },
+  ];
+
+  const urgencyFilters: Array<{ id: EndingFilter; label: string }> = [
+    { id: "all", label: "Всі" },
+    { id: "critical", label: "До 15 хв" },
+    { id: "soon", label: "15-60 хв" },
+    { id: "overdue", label: "Прострочені" },
+  ];
+
+  const sortOptions: Array<{ id: OccupiedSort; label: string }> = [
+    { id: "end-asc", label: "Кінець: ближче" },
+    { id: "end-desc", label: "Кінець: далі" },
+    { id: "amount-desc", label: "Сума: більша" },
+  ];
+
   return (
-    <div className="min-h-screen bg-neutral-100">
-      <div className="border-b border-neutral-200 bg-white px-6 py-4">
-        <h1 className="text-xl font-semibold text-neutral-800">
-          Панель керування
-        </h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Зайняті місця та активні сесії
-        </p>
-      </div>
-
-      <div className="p-6">
-        <section className="mb-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-neutral-500">Всього ПК</p>
-            <p className="mt-1 text-2xl font-semibold text-neutral-900">{totalItems}</p>
-          </div>
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-emerald-700">Вільні</p>
-            <p className="mt-1 text-2xl font-semibold text-emerald-900">{freeItems.length}</p>
-          </div>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-amber-700">Зайняті</p>
-            <p className="mt-1 text-2xl font-semibold text-amber-900">{occupiedItems.length}</p>
-          </div>
-          <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-violet-700">
-              Завантаження / Ремонт
-            </p>
-            <p className="mt-1 text-2xl font-semibold text-violet-900">
-              {occupancyPercent}% / {repairItemsCount}
-            </p>
-          </div>
-        </section>
-
-        <section className="mb-8 grid gap-3 lg:grid-cols-3">
-          <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-rose-700">Прострочені сесії</p>
-            <p className="mt-1 text-2xl font-semibold text-rose-900">{overdueCount}</p>
-          </div>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-amber-700">
-              Завершуються до 15 хв
-            </p>
-            <p className="mt-1 text-2xl font-semibold text-amber-900">{criticalCount}</p>
-          </div>
-          <div className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-neutral-500">
-              Відфільтровано зайнятих
-            </p>
-            <p className="mt-1 text-2xl font-semibold text-neutral-900">
-              {occupiedViewRows.length}
-            </p>
-          </div>
-        </section>
-
-        <section>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
-              Зайняті ({occupiedViewRows.length} / {occupiedItems.length})
-            </h2>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <Link
-                href={buildAdminHref({
-                  auditSource,
-                  auditLimit,
-                  q: query,
-                  type: "all",
-                  ending: endingFilter,
-                  sort: occupiedSort,
-                })}
-                className={`rounded-md px-3 py-1.5 font-semibold ${
-                  typeFilter === "all"
-                    ? "bg-neutral-800 text-white"
-                    : "bg-white text-neutral-700 ring-1 ring-neutral-200"
-                }`}
-              >
-                Всі типи
-              </Link>
-              <Link
-                href={buildAdminHref({
-                  auditSource,
-                  auditLimit,
-                  q: query,
-                  type: "VIP",
-                  ending: endingFilter,
-                  sort: occupiedSort,
-                })}
-                className={`rounded-md px-3 py-1.5 font-semibold ${
-                  typeFilter === "VIP"
-                    ? "bg-neutral-800 text-white"
-                    : "bg-white text-neutral-700 ring-1 ring-neutral-200"
-                }`}
-              >
-                VIP
-              </Link>
-              <Link
-                href={buildAdminHref({
-                  auditSource,
-                  auditLimit,
-                  q: query,
-                  type: "Standard",
-                  ending: endingFilter,
-                  sort: occupiedSort,
-                })}
-                className={`rounded-md px-3 py-1.5 font-semibold ${
-                  typeFilter === "Standard"
-                    ? "bg-neutral-800 text-white"
-                    : "bg-white text-neutral-700 ring-1 ring-neutral-200"
-                }`}
-              >
-                Standard
-              </Link>
-              <Link
-                href={buildAdminHref({
-                  auditSource,
-                  auditLimit,
-                  q: query,
-                  type: "PS5",
-                  ending: endingFilter,
-                  sort: occupiedSort,
-                })}
-                className={`rounded-md px-3 py-1.5 font-semibold ${
-                  typeFilter === "PS5"
-                    ? "bg-neutral-800 text-white"
-                    : "bg-white text-neutral-700 ring-1 ring-neutral-200"
-                }`}
-              >
-                PS5
-              </Link>
+    <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
+      <div className="mx-auto max-w-7xl px-4 py-8 md:px-6">
+        <header className="mb-6 rounded-2xl border border-[var(--border-soft)] bg-[var(--panel-bg)] p-5 backdrop-blur-xl">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                ADMIN CONTROL
+              </p>
+              <h1 className="mt-1 text-2xl font-black tracking-tight md:text-3xl">
+                Панель керування залом
+              </h1>
+              <p className="mt-2 text-sm text-[var(--text-muted)]">
+                Керуйте активними сесіями, контролюйте ризики та відстежуйте аудит подій.
+              </p>
+            </div>
+            <div className="rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-3 text-right">
+              <p className="text-xs uppercase tracking-wide text-[var(--accent-text)]">Стан залу</p>
+              <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{occupancyLabel}</p>
+              <p className="text-xs text-[var(--text-muted)]">Завантаження: {occupancyPercent}%</p>
             </div>
           </div>
+        </header>
 
-          <div className="mb-3 grid gap-2 lg:grid-cols-3">
-            <form className="lg:col-span-1" action="/admin" method="get">
-              <input type="hidden" name="auditSource" value={auditSource} />
-              <input type="hidden" name="auditLimit" value={auditLimit} />
-              {typeFilter !== "all" && <input type="hidden" name="type" value={typeFilter} />}
-              {endingFilter !== "all" && <input type="hidden" name="ending" value={endingFilter} />}
-              {occupiedSort !== "end-asc" && <input type="hidden" name="sort" value={occupiedSort} />}
-              <div className="flex gap-2">
-                <input
-                  name="q"
-                  defaultValue={query}
-                  placeholder="Пошук: ПК або клієнт"
-                  className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-800 outline-none transition focus:border-neutral-500"
-                />
-                <button
-                  type="submit"
-                  className="rounded-md bg-neutral-800 px-3 py-2 text-sm font-semibold text-white transition hover:bg-neutral-700"
-                >
-                  Знайти
-                </button>
+        <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-[var(--border-soft)] bg-[var(--panel-bg)] p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Всього ПК</p>
+              <MonitorCog className="h-4 w-4 text-cyan-300" />
+            </div>
+            <p className="mt-2 text-3xl font-black">{totalItems}</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-wide text-emerald-200">Вільні</p>
+              <MonitorPlay className="h-4 w-4 text-emerald-300" />
+            </div>
+            <p className="mt-2 text-3xl font-black text-emerald-100">{freeCount}</p>
+          </div>
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-wide text-amber-200">Зайняті</p>
+              <Activity className="h-4 w-4 text-amber-300" />
+            </div>
+            <p className="mt-2 text-3xl font-black text-amber-100">{occupiedCount}</p>
+          </div>
+          <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-wide text-rose-200">У ремонті</p>
+              <MonitorOff className="h-4 w-4 text-rose-300" />
+            </div>
+            <p className="mt-2 text-3xl font-black text-rose-100">{repairItemsCount}</p>
+          </div>
+        </section>
+
+        <section className="mb-6 grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-rose-200">Прострочені сесії</p>
+              <Siren className="h-4 w-4 text-rose-300" />
+            </div>
+            <p className="mt-2 text-2xl font-black text-rose-100">{overdueCount}</p>
+          </div>
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-amber-200">До завершення 15 хв</p>
+              <TriangleAlert className="h-4 w-4 text-amber-300" />
+            </div>
+            <p className="mt-2 text-2xl font-black text-amber-100">{criticalCount}</p>
+          </div>
+          <div className="rounded-2xl border border-[var(--border-soft)] bg-[var(--panel-bg)] p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-[var(--text-muted)]">Поточний фільтр</p>
+              <Shield className="h-4 w-4 text-[var(--accent-text)]" />
+            </div>
+            <p className="mt-2 text-2xl font-black">{occupiedViewRows.length}</p>
+            <p className="text-xs text-[var(--text-muted)]">з {occupiedItems.length} зайнятих місць</p>
+          </div>
+        </section>
+
+        <div className="grid gap-6 xl:grid-cols-3">
+          <section className="xl:col-span-2">
+            <div className="rounded-2xl border border-[var(--border-soft)] bg-[var(--panel-bg)] p-4 backdrop-blur-xl md:p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold">Активні сесії</h2>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Керування зайнятими місцями в реальному часі
+                  </p>
+                </div>
+                <span className="rounded-full border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent-text)]">
+                  {occupiedViewRows.length} / {occupiedItems.length}
+                </span>
               </div>
-            </form>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-semibold text-neutral-500">Терміновість:</span>
-              {(["all", "critical", "soon", "overdue"] as const).map((value) => (
-                <Link
-                  key={value}
-                  href={buildAdminHref({
-                    auditSource,
-                    auditLimit,
-                    q: query,
-                    type: typeFilter,
-                    ending: value,
-                    sort: occupiedSort,
-                  })}
-                  className={`rounded-md px-3 py-1.5 font-semibold ${
-                    endingFilter === value
-                      ? "bg-neutral-800 text-white"
-                      : "bg-white text-neutral-700 ring-1 ring-neutral-200"
-                  }`}
-                >
-                  {value === "all"
-                    ? "Всі"
-                    : value === "critical"
-                      ? "До 15 хв"
-                      : value === "soon"
-                        ? "15-60 хв"
-                        : "Прострочено"}
-                </Link>
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-semibold text-neutral-500">Сортування:</span>
-              {([
-                { id: "end-asc", label: "Кінець: ближче" },
-                { id: "end-desc", label: "Кінець: далі" },
-                { id: "amount-desc", label: "Сума: більша" },
-              ] as const).map((sortOption) => (
-                <Link
-                  key={sortOption.id}
-                  href={buildAdminHref({
-                    auditSource,
-                    auditLimit,
-                    q: query,
-                    type: typeFilter,
-                    ending: endingFilter,
-                    sort: sortOption.id,
-                  })}
-                  className={`rounded-md px-3 py-1.5 font-semibold ${
-                    occupiedSort === sortOption.id
-                      ? "bg-neutral-800 text-white"
-                      : "bg-white text-neutral-700 ring-1 ring-neutral-200"
-                  }`}
-                >
-                  {sortOption.label}
-                </Link>
-              ))}
-            </div>
-          </div>
 
-          <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-neutral-200 bg-neutral-50">
-                  <th className="px-4 py-3 font-medium text-neutral-700">
-                    ПК
-                  </th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">
-                    Тип
-                  </th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">
-                    Клієнт
-                  </th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">
-                    Початок
-                  </th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">
-                    Кінець
-                  </th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">
-                    Сума
-                  </th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">
-                    Ризик
-                  </th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">
-                    Дія
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {occupiedViewRows.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={8}
-                      className="px-4 py-8 text-center text-neutral-500"
-                    >
-                      Немає зайнятих місць за поточним фільтром
-                    </td>
-                  </tr>
-                ) : (
-                  occupiedViewRows.map((row) => (
-                    <tr
-                      key={row._id}
-                      className="border-b border-neutral-100 last:border-0"
-                    >
-                      <td className="px-4 py-3 font-medium text-neutral-800">
-                        {row.name}
-                      </td>
-                      <td className="px-4 py-3 text-neutral-600">{row.type}</td>
-                      <td className="px-4 py-3 text-neutral-600">
-                        {row.booking?.clientName ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-neutral-600">
-                        {row.booking
-                          ? `${formatDate(row.booking.startTime)} ${formatTime(row.booking.startTime)}`
-                          : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-neutral-600">
-                        {row.booking
-                          ? `${formatDate(row.booking.endTime)} ${formatTime(row.booking.endTime)}`
-                          : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-neutral-600">
-                        {row.booking
-                          ? `${row.booking.totalAmount} грн`
-                          : "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        {row.diffMinutes < 0 ? (
-                          <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">
-                            Прострочено
-                          </span>
-                        ) : row.diffMinutes <= 15 ? (
-                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                            Критично
-                          </span>
-                        ) : row.diffMinutes <= 60 ? (
-                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">
-                            Скоро
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                            Норма
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <AdminPCAction
-                          computerId={row._id}
-                          computerName={row.name}
-                        />
-                      </td>
+              <div className="mb-4 space-y-3">
+                <form action="/admin" method="get" className="flex flex-col gap-2 md:flex-row">
+                  <input type="hidden" name="auditSource" value={auditSource} />
+                  <input type="hidden" name="auditLimit" value={auditLimit} />
+                  {typeFilter !== "all" && <input type="hidden" name="type" value={typeFilter} />}
+                  {endingFilter !== "all" && <input type="hidden" name="ending" value={endingFilter} />}
+                  {occupiedSort !== "end-asc" && <input type="hidden" name="sort" value={occupiedSort} />}
+                  <label className="relative flex-1">
+                    <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-muted)]" />
+                    <input
+                      name="q"
+                      defaultValue={query}
+                      placeholder="Пошук: назва ПК або клієнт"
+                      className="w-full rounded-xl border border-[var(--border-soft)] bg-black/20 py-2.5 pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--accent-border)]"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 py-2.5 text-sm font-semibold text-[var(--accent-text)] transition hover:brightness-110"
+                  >
+                    Застосувати
+                  </button>
+                </form>
+
+                <div className="space-y-3 rounded-xl border border-[var(--border-soft)] bg-black/15 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)]">
+                      <MonitorCog className="h-3.5 w-3.5" />
+                      Тип
+                    </span>
+                    {typeFilters.map((filter) => (
+                      <Link
+                        key={filter.id}
+                        href={buildAdminHref({ ...commonParams, type: filter.id })}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                          typeFilter === filter.id
+                            ? "border border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                            : "border border-[var(--border-soft)] bg-transparent text-[var(--text-muted)] hover:border-[var(--accent-border)] hover:text-[var(--text-primary)]"
+                        }`}
+                      >
+                        {filter.label}
+                      </Link>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)]">
+                      <TriangleAlert className="h-3.5 w-3.5" />
+                      Терміновість
+                    </span>
+                    {urgencyFilters.map((filter) => (
+                      <Link
+                        key={filter.id}
+                        href={buildAdminHref({ ...commonParams, ending: filter.id })}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                          endingFilter === filter.id
+                            ? "border border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                            : "border border-[var(--border-soft)] bg-transparent text-[var(--text-muted)] hover:border-[var(--accent-border)] hover:text-[var(--text-primary)]"
+                        }`}
+                      >
+                        {filter.label}
+                      </Link>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)]">
+                      <ArrowUpDown className="h-3.5 w-3.5" />
+                      Сортування
+                    </span>
+                    {sortOptions.map((option) => (
+                      <Link
+                        key={option.id}
+                        href={buildAdminHref({ ...commonParams, sort: option.id })}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                          occupiedSort === option.id
+                            ? "border border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                            : "border border-[var(--border-soft)] bg-transparent text-[var(--text-muted)] hover:border-[var(--accent-border)] hover:text-[var(--text-primary)]"
+                        }`}
+                      >
+                        {option.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-[var(--border-soft)]">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-black/25 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                    <tr>
+                      <th className="px-4 py-3">ПК</th>
+                      <th className="px-4 py-3">Клієнт</th>
+                      <th className="px-4 py-3">Проміжок</th>
+                      <th className="px-4 py-3">Сума</th>
+                      <th className="px-4 py-3">Ризик</th>
+                      <th className="px-4 py-3">Залишок</th>
+                      <th className="px-4 py-3 text-right">Дія</th>
                     </tr>
+                  </thead>
+                  <tbody>
+                    {occupiedViewRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">
+                          За поточними фільтрами немає активних сесій
+                        </td>
+                      </tr>
+                    ) : (
+                      occupiedViewRows.map((row) => {
+                        const risk = getRiskMeta(row.diffMinutes);
+                        return (
+                          <tr key={row._id} className="border-t border-[var(--border-soft)]/70">
+                            <td className="px-4 py-3">
+                              <p className="font-semibold text-[var(--text-primary)]">{row.name}</p>
+                              <p className="text-xs text-[var(--text-muted)]">{row.type}</p>
+                            </td>
+                            <td className="px-4 py-3 text-[var(--text-primary)]">
+                              {row.booking?.clientName ?? "—"}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-[var(--text-muted)]">
+                              {row.booking
+                                ? `${formatDate(row.booking.startTime)} ${formatTime(row.booking.startTime)} - ${formatDate(row.booking.endTime)} ${formatTime(row.booking.endTime)}`
+                                : "—"}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-[var(--text-primary)]">
+                              {row.booking ? `${row.booking.totalAmount} грн` : "—"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${risk.className}`}>
+                                {risk.label}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs font-medium text-[var(--text-primary)]">
+                              {formatRemaining(row.diffMinutes)}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <AdminPCAction computerId={row._id} computerName={row.name} />
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <aside className="space-y-6">
+            <section className="rounded-2xl border border-[var(--border-soft)] bg-[var(--panel-bg)] p-4 backdrop-blur-xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  Вільні та сервісні місця
+                </h2>
+                <span className="rounded-full border border-[var(--border-soft)] px-2.5 py-1 text-xs text-[var(--text-muted)]">
+                  {freeItems.length}
+                </span>
+              </div>
+              <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                {freeItems.length === 0 ? (
+                  <p className="text-sm text-[var(--text-muted)]">Немає вільних або сервісних місць</p>
+                ) : (
+                  freeItems.map((row) => (
+                    <div
+                      key={row._id}
+                      className="rounded-xl border border-[var(--border-soft)] bg-black/20 px-3 py-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-[var(--text-primary)]">{row.name}</p>
+                          <p className="text-xs text-[var(--text-muted)]">
+                            {row.type} · {row.pricePerHour} грн/год
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            row.status === "вільний"
+                              ? "border border-emerald-500/30 bg-emerald-500/15 text-emerald-200"
+                              : "border border-rose-500/30 bg-rose-500/15 text-rose-200"
+                          }`}
+                        >
+                          {row.status}
+                        </span>
+                      </div>
+                    </div>
                   ))
                 )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+              </div>
+            </section>
 
-        <section className="mt-8">
-          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-500">
-            Вільні та інші ({freeItems.length})
-          </h2>
-          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {freeItems.map((row) => (
-              <div
-                key={row._id}
-                className="rounded-lg border border-neutral-200 bg-white px-4 py-3"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-medium text-neutral-800">{row.name}</p>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      row.status === "вільний"
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-rose-100 text-rose-700"
+            <section className="rounded-2xl border border-[var(--border-soft)] bg-[var(--panel-bg)] p-4 backdrop-blur-xl">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  <Archive className="h-4 w-4" />
+                  Audit Log
+                </h2>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={buildAdminHref({ ...commonParams, auditSource: "main" })}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                      auditSource === "main"
+                        ? "border border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                        : "border border-[var(--border-soft)] text-[var(--text-muted)]"
                     }`}
                   >
-                    {row.status}
-                  </span>
+                    Main
+                  </Link>
+                  <Link
+                    href={buildAdminHref({ ...commonParams, auditSource: "archive" })}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                      auditSource === "archive"
+                        ? "border border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                        : "border border-[var(--border-soft)] text-[var(--text-muted)]"
+                    }`}
+                  >
+                    Archive
+                  </Link>
                 </div>
-                <p className="mt-1 text-sm text-neutral-500">
-                  {row.type} · {row.pricePerHour} грн/год
-                </p>
               </div>
-            ))}
-          </div>
-        </section>
 
-        <section className="mt-8">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
-              Audit Log ({auditSource === "archive" ? "архів" : "основний"}, останні{" "}
-              {auditItems.length})
-            </h2>
-            <div className="flex items-center gap-2">
-              <Link
-                href={`/admin?auditSource=main&auditLimit=${auditLimit}`}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
-                  auditSource === "main"
-                    ? "bg-neutral-800 text-white"
-                    : "bg-white text-neutral-700 ring-1 ring-neutral-200"
-                }`}
-              >
-                Main
-              </Link>
-              <Link
-                href={`/admin?auditSource=archive&auditLimit=${auditLimit}`}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
-                  auditSource === "archive"
-                    ? "bg-neutral-800 text-white"
-                    : "bg-white text-neutral-700 ring-1 ring-neutral-200"
-                }`}
-              >
-                Archive
-              </Link>
-              <Link
-                href={`/admin?auditSource=${auditSource}&auditLimit=25`}
-                className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 ring-1 ring-neutral-200"
-              >
-                25
-              </Link>
-              <Link
-                href={`/admin?auditSource=${auditSource}&auditLimit=50`}
-                className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 ring-1 ring-neutral-200"
-              >
-                50
-              </Link>
-            </div>
-          </div>
-          <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-neutral-200 bg-neutral-50">
-                  <th className="px-4 py-3 font-medium text-neutral-700">Подія</th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">Роль</th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">Email</th>
-                  <th className="px-4 py-3 font-medium text-neutral-700">Час</th>
-                </tr>
-              </thead>
-              <tbody>
+              <div className="mb-3 flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)]">
+                  <ArrowUpDown className="h-3.5 w-3.5" />
+                  Ліміт
+                </span>
+                {[10, 25, 50].map((limit) => (
+                  <Link
+                    key={limit}
+                    href={buildAdminHref({ ...commonParams, auditLimit: limit })}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                      auditLimit === limit
+                        ? "border border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
+                        : "border border-[var(--border-soft)] text-[var(--text-muted)]"
+                    }`}
+                  >
+                    {limit}
+                  </Link>
+                ))}
+              </div>
+
+              <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
                 {auditItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-neutral-500">
-                      Подій поки немає
-                    </td>
-                  </tr>
+                  <p className="rounded-xl border border-[var(--border-soft)] bg-black/20 px-3 py-4 text-sm text-[var(--text-muted)]">
+                    Подій поки немає
+                  </p>
                 ) : (
                   auditItems.map((row) => (
-                    <tr key={row._id} className="border-b border-neutral-100 last:border-0">
-                      <td className="px-4 py-3 text-neutral-700">{row.action}</td>
-                      <td className="px-4 py-3">
+                    <div
+                      key={row._id}
+                      className="rounded-xl border border-[var(--border-soft)] bg-black/20 px-3 py-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold text-[var(--text-primary)]">{row.action}</p>
                         <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                             row.actorRole === "admin"
-                              ? "bg-violet-100 text-violet-700"
+                              ? "border border-violet-500/30 bg-violet-500/15 text-violet-200"
                               : row.actorRole === "system"
-                                ? "bg-slate-100 text-slate-700"
-                                : "bg-cyan-100 text-cyan-700"
+                                ? "border border-slate-500/30 bg-slate-500/15 text-slate-200"
+                                : "border border-cyan-500/30 bg-cyan-500/15 text-cyan-200"
                           }`}
                         >
                           {row.actorRole}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 text-neutral-600">
-                        {row.actorEmail ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-neutral-600">
-                        {row.createdAt
-                          ? `${formatDate(row.createdAt)} ${formatTime(row.createdAt)}`
-                          : "—"}
-                      </td>
-                    </tr>
+                      </div>
+                      <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        {row.actorEmail ?? "—"} ·{" "}
+                        {row.createdAt ? `${formatDate(row.createdAt)} ${formatTime(row.createdAt)}` : "—"}
+                      </p>
+                    </div>
                   ))
                 )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+              </div>
+            </section>
+          </aside>
+        </div>
       </div>
     </div>
   );

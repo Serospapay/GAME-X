@@ -35,3 +35,14 @@ body {
   background-color: var(--app-bg);
   color: var(--text-primary);
 }
+
+.bg-grid-overlay {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.bg-hero-radial {
+  background: radial-gradient(ellipse at top, var(--hero-glow), transparent 55%);
+}

@@ -1,7 +1,7 @@
-import mongoose from "mongoose";
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-guard";
+import { buildBookingOwnerQuery } from "@/lib/booking-owner";
 import { getPolicy, RATE_LIMIT_POLICIES } from "@/lib/rate-limit-policy";
 import { checkRoleRateLimit, getIpKey } from "@/lib/rate-limit";
 import { isAdmin } from "@/lib/admin";
@@ -37,12 +37,15 @@ export async function GET(request: NextRequest) {
   const auth = await requireAuth();
   if (auth.response) return auth.response;
   const { session } = auth;
+  const userEmail = session.user.email ?? "";
+  const adminMode = isAdmin(userEmail);
+  const role = adminMode ? "admin" : "user";
   const identityKey = session.user.email ?? session.user.id ?? getIpKey(request);
-  const rate = checkRoleRateLimit(
+  const rate = await checkRoleRateLimit(
     "personalization",
-    "user",
+    role,
     identityKey,
-    getPolicy(RATE_LIMIT_POLICIES.personalization, "user")
+    getPolicy(RATE_LIMIT_POLICIES.personalization, role)
   );
   if (!rate.allowed) {
     return fail(
@@ -55,8 +58,6 @@ export async function GET(request: NextRequest) {
   await connectDB();
 
   const name = session.user.name ?? "Гравець";
-  const userEmail = session.user.email ?? "";
-  const adminMode = isAdmin(userEmail);
 
   if (adminMode) {
     const [totalComputers, freeComputers, busyComputers, repairComputers, activeSessions] =
@@ -96,19 +97,10 @@ export async function GET(request: NextRequest) {
     return ok(payload);
   }
 
-  const filters: Array<Record<string, unknown>> = [];
-  if (session.user.id && mongoose.Types.ObjectId.isValid(session.user.id)) {
-    filters.push({ clientId: new mongoose.Types.ObjectId(session.user.id) });
-  }
-  if (userEmail) {
-    filters.push({ clientEmail: userEmail });
-  }
-  if (filters.length === 0) {
-    filters.push({ _id: null });
-  }
-
-  const ownerQuery = filters.length === 1 ? filters[0] : { $or: filters };
-
+  const ownerQuery = buildBookingOwnerQuery({
+    userId: session.user.id,
+    email: userEmail,
+  });
   const ownerMatch = ownerQuery as Record<string, unknown>;
 
   const [activeBookings, completedStats, preferredTypeAgg, latestBooking] = await Promise.all([

@@ -1,11 +1,38 @@
 import LiveMap from "@/components/LiveMap";
 import PersonalizedHomePanel from "@/components/PersonalizedHomePanel";
-import { Clock3, Cpu, Crown, Gamepad2, MapPinned, ShieldCheck, Zap } from "lucide-react";
+import {
+  Clock3,
+  Cpu,
+  Crown,
+  Gamepad2,
+  MapPinned,
+  ShieldCheck,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import { fetchTariffs } from "@/lib/tariffs";
 
-const tariffs = [
-  { name: "Standard", price: "50 грн/год", icon: Cpu, note: "RTX 4060 · 240Hz · Механіка" },
-  { name: "VIP", price: "100 грн/год", icon: Crown, note: "RTX 4090 · Преміум зона · Максимум комфорту" },
-  { name: "PS5", price: "80 грн/год", icon: Gamepad2, note: "DualSense · 4K HDR · PS Plus" },
+const tariffMeta: Record<string, { icon: LucideIcon; note: string; label: string }> = {
+  Standard: {
+    icon: Cpu,
+    label: "Standard",
+    note: "RTX 4060 · 240Hz · Механіка",
+  },
+  VIP: {
+    icon: Crown,
+    label: "VIP",
+    note: "RTX 4090 · Преміум зона · Максимум комфорту",
+  },
+  PS5: {
+    icon: Gamepad2,
+    label: "PS5",
+    note: "DualSense · 4K HDR · PS Plus",
+  },
+};
+const defaultTariffs = [
+  { type: "Standard", pricePerHour: 50 },
+  { type: "VIP", pricePerHour: 100 },
+  { type: "PS5", pricePerHour: 80 },
 ];
 
 const quickCards = [
@@ -32,24 +59,28 @@ const quickCards = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const tariffsData = await fetchTariffs().catch(() => []);
+  const tariffs = (tariffsData.length > 0 ? tariffsData : defaultTariffs).map((tariff) => {
+    const meta = tariffMeta[tariff.type] ?? {
+      icon: Cpu,
+      label: tariff.type,
+      note: "Преміальна конфігурація",
+    };
+    return {
+      name: meta.label,
+      price: `${tariff.pricePerHour} грн/год`,
+      icon: meta.icon,
+      note: meta.note,
+    };
+  });
+
   return (
     <main className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
       <div
-        className="pointer-events-none fixed inset-0 opacity-[0.06]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)",
-          backgroundSize: "28px 28px",
-        }}
+        className="bg-grid-overlay pointer-events-none fixed inset-0 opacity-[0.06]"
       />
-      <div
-        className="pointer-events-none fixed inset-0"
-        style={{
-          background:
-            "radial-gradient(ellipse at top, var(--hero-glow), transparent 55%)",
-        }}
-      />
+      <div className="bg-hero-radial pointer-events-none fixed inset-0" />
 
       <section className="relative mx-auto max-w-7xl px-4 pb-8 pt-8 md:pb-12 md:pt-12">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">

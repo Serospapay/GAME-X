@@ -12,9 +12,9 @@ const MAIN_RETENTION_DAYS = 7;
 const ARCHIVE_RETENTION_DAYS = 180;
 const DEFAULT_BATCH_LIMIT = 500;
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const ipKey = getIpKey(request);
-  const rate = checkRoleRateLimit(
+  const rate = await checkRoleRateLimit(
     "cron-audit-archive",
     "system",
     ipKey,
@@ -121,7 +121,11 @@ export async function GET(request: NextRequest) {
         message: error instanceof Error ? error.message : "Unknown error",
       },
     });
-    console.error("GET /api/cron/archive-audit-logs:", error);
+    console.error("POST /api/cron/archive-audit-logs:", error);
     return fail("Помилка архівації audit logs", 500, "CRON_ARCHIVE_AUDIT_FAILED");
   }
+}
+
+export async function GET() {
+  return fail("Method Not Allowed", 405, "METHOD_NOT_ALLOWED");
 }
